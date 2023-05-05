@@ -13,11 +13,11 @@ import matplotlib.pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
 
 def model_coeffs(
-    base1:float = 1e-3,
-    base2:float = 5e-4,
+    base1: float = 1e-3,
+    base2: float = 5e-4,
     zz: bool = False,
     m: float = 2.,
-    rnd_seed=None
+    rnd_seed: int = None
                 ):
     
     if rnd_seed is not None:
@@ -36,10 +36,8 @@ def model_coeffs(
 
     return model_coeffs_lambda, model_coeffs_phi
 
-def mk_omega(
-    data: list,
-            ):
-    return [0.5*(1 + np.exp(-2 * x)) for x in data]
+def mk_omega(data: list):
+    return [0.5 * (1 + np.exp(-2 * np.abs(x))) for x in data]
 
 
 class PauliNoise:
@@ -92,7 +90,7 @@ class PauliNoise:
                 {key: Qobj(tensor(tensor(ele), tensor(ele).trans()), dims=[dim_list, dim_list])
                           for key, ele in zip(self.labels, tensor_lists)})
     
-    def generate_kraus_ops(self, diff_omegas:List[float]=None):
+    def generate_kraus_ops(self, diff_omegas: List[float] = None):
         ''' 
         This is not yet general. Only works for n=2 qubits. In particular,
         the probabilities need to be in order: 0:3 are qubit 0, 3:6 are qubit 1,
@@ -103,19 +101,17 @@ class PauliNoise:
         else:
             comb_list = [(w, x) for w, x in zip(diff_omegas, self.labels)]
         k_ops2 = [np.sqrt(1-w) * self.model_gates[x] for w, x in comb_list]
-        k_ops2.insert(0, np.sqrt(1 - sum(1-x for x, y in comb_list)) *
+        k_ops2.insert(0, np.sqrt(1 - sum(1-w for w, x in comb_list)) *
                             tensor(qeye(2), qeye(2)))
-        k_ops1 = [np.sqrt(1-w) * self.model_gates[x]
-                       for w, x in comb_list[3:6]]
-        k_ops1.insert(0, np.sqrt(1 - sum(1-x for x, y in comb_list[3:6])) *
+        k_ops1 = [np.sqrt(1-w) * self.model_gates[x] for w, x in comb_list[3:6]]
+        k_ops1.insert(0, np.sqrt(1 - sum(1-w for w, x in comb_list[3:6])) *
                             tensor(qeye(2), qeye(2)))
-        k_ops0 = [np.sqrt(1-w) * self.model_gates[x]
-                       for w, x in comb_list[0:3]]
-        k_ops0.insert(0, np.sqrt(1 - sum(1-x for x, y in comb_list[0:3])) *
+        k_ops0 = [np.sqrt(1-w) * self.model_gates[x] for w, x in comb_list[0:3]]
+        k_ops0.insert(0, np.sqrt(1 - sum(1-w for w, x in comb_list[0:3])) *
                             tensor(qeye(2), qeye(2)))
         return (k_ops0, k_ops1, k_ops2)
     
-    def generate_super_ops(self, target_kops:List[Qobj]=None):
+    def generate_super_ops(self, target_kops: List[Qobj] = None):
         ''' 
         This would work for any output from generate_kraus_ops.
         '''
@@ -131,24 +127,23 @@ class PauliNoise:
     def instantiate_target(self, target_phis):
         ''' Makes the target noise model. '''
         self.target = target_phis
-        self.target_omegas = [0.5*(1 + np.exp(-2 * x)) for x in self.target]
+        self.target_omegas = [0.5*(1 + np.exp(-2 * np.abs(x))) for x in self.target]
         self.kraus_ops_targ = self.generate_kraus_ops(self.target_omegas)
         self.super_ops_targ = self.generate_super_ops(self.kraus_ops_targ)
         
     def define_inverse(self):
         ''' Defines the map connecting the lambda noise model and the target noise model. '''
         if self.target is not None:
-            self.inverse = [a - b if a - b >= 0 else 0 for a, b in 
-                            zip(self.lambdas, self.target)]
+            self.inverse = [a - b for a, b in zip(self.lambdas, self.target)]
         else:
             raise ValueError('Need to instantiate the target noise model first.')
         self.inverse_omegas = mk_omega(self.inverse)
-        overhead = [np.exp(sum([2*x for x in self.inverse[0:3]])),
-                    np.exp(sum([2*x for x in self.inverse[3:6]])),
-                    np.exp(sum([2*x for x in self.inverse]))]
+        overhead = [np.exp(sum([2*x if x > 0 else 0 for x in self.inverse[0:3]])),
+                    np.exp(sum([2*x if x > 0 else 0 for x in self.inverse[3:6]])),
+                    np.exp(sum([2*x if x > 0 else 0 for x in self.inverse]))]
         self.gammas = tuple(overhead)
 
-    def make_plot(self, ttl:str=None, save_file:str=None):
+    def make_plot(self, ttl: str = None, font_size: str = 20, save_file: str = None):
         '''
         Makes a bar plot of the model coefficients. Give ttl to set a title, and
         save_file to output the graph to a pdf named <save_file>.pdf.
@@ -159,17 +154,17 @@ class PauliNoise:
         fig, axes = plt.subplots(1,1, figsize=(9,6))
 
         axes.bar([n for n, _ in enumerate(self.lambdas)], self.lambdas, 
-                 label='$\lambda_{k \in \mathcal{K}}$', tick_label=self.labels, color='magenta')
+                 label='$\lambda_{k \in \mathcal{K}}$', tick_label=self.labels, color='0.25')
         axes.bar([n for n, _ in enumerate(self.target)], self.target, 
-                 label='$\phi_{k \in \mathcal{K}}$', width=0.25, tick_label=self.labels, color='0.5')
+                 label='$\phi_{k \in \mathcal{K}}$', width=0.25, tick_label=self.labels, color='magenta')
 
-        axes.legend()
+        axes.legend(fontsize=font_size)
 
         if ttl is not None and type(ttl)==str:
-            axes.set_title(ttl, fontsize=20, color=bw)
-        axes.set_xlabel(r'$\mathcal{K}$', fontsize=20, color=bw)
-        axes.set_ylabel(r'Values', fontsize=20, color=bw)
-        axes.tick_params(colors=bw, which='both')
+            axes.set_title(ttl, fontsize=font_size, color=bw)
+        axes.set_xlabel(r'$\mathcal{K}$', fontsize=font_size, color=bw)
+        axes.set_ylabel(r'Values', fontsize=font_size, color=bw)
+        axes.tick_params(colors=bw, which='both', labelsize=(font_size - 5))
 
         fig.tight_layout()
         plt.show()

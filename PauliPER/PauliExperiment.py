@@ -10,19 +10,14 @@ from PauliPER.PauliNoise import *
 from PauliPER.ns_utils_ import mk_circ
 
 
-def get_gates(labels: List[str], probabilities: List[float]):
-    return [np.random.choice(['II', a], p=[b, 1-b]) for a, b in zip(labels, probabilities)]
+def get_gates(labels: List[str], probabilities: List[float], base_values: List[float]):
+    return [(np.random.choice(['II', a], p=[b, 1-b]), c) for a, b, c in zip(labels, probabilities, base_values)]
 
 class PauliExperiment:
     
-    def __init__(self, noise_object:PauliNoise, trotter_time_step:float, Jz:float=1, hx:float=1): #gates:List[QuantumCircuit]
+    def __init__(self, noise_object:PauliNoise, trotter_time_step:float, Jz:float=1, hx:float=1):
         self.noise_object = noise_object
         self.gates = self.hamiltonian(trotter_time_step, Jz, hx)
-        # for gate in gates:
-        #     if type(gate) is not QuantumCircuit:
-        #         raise ValueError('All input gates must be qiskit.QuantumCircuit class.')
-        #     else:
-        #         self.gates = gates
         self.gate_super_ops = []
         self.results_dict = dict()
         self.histogram = None
@@ -45,8 +40,7 @@ class PauliExperiment:
     
     def make_gate_super_ops(self):
         dim_list = [[2,2] for _ in range(self.noise_object.num_qubits)]
-        self.gate_super_ops = tuple(Qobj(SuperOp(gate).data, dims=[dim_list, dim_list]) 
-                                    for gate in self.gates)
+        self.gate_super_ops = tuple(Qobj(SuperOp(gate).data, dims=[dim_list, dim_list]) for gate in self.gates)
 
     def evolve_trotter_tfim(self, trotter_steps:int):
         if len(self.gate_super_ops) > 0:
@@ -55,44 +49,43 @@ class PauliExperiment:
             self.make_gate_super_ops()
             cx, rz1, rx0, rx1 = self.gate_super_ops
         self.trotter_steps = int(trotter_steps)
-        trotter_gate = total_gamma = 1
-        num_pauli = 0
+        trotter_gate = 1; total_gamma = 1; num_pauli = 0
         for _ in range(int(trotter_steps)):
-            cx1_err_gate = cx2_err_gate = rz1_err_gate = rx0_err_gate = rx1_err_gate = 1
-            cx1_error = get_gates(self.noise_object.labels,
-                                  self.noise_object.inverse_omegas)
-            cx2_error = get_gates(self.noise_object.labels,
-                                  self.noise_object.inverse_omegas)
-            rz1_error = get_gates(self.noise_object.labels[3:6],
-                                  self.noise_object.inverse_omegas[3:6])
-            rx0_error = get_gates(self.noise_object.labels[0:3],
-                                  self.noise_object.inverse_omegas[0:3])
-            rx1_error = get_gates(self.noise_object.labels[3:6],
-                                  self.noise_object.inverse_omegas[3:6])
+            cx1_err_gate = 1; cx2_err_gate = 1; rz1_err_gate = 1; rx0_err_gate = 1; rx1_err_gate = 1
+            cx1_error = get_gates(self.noise_object.labels, self.noise_object.inverse_omegas, self.noise_object.inverse)
+            cx2_error = get_gates(self.noise_object.labels, self.noise_object.inverse_omegas, self.noise_object.inverse)
+            rz1_error = get_gates(self.noise_object.labels[3:6], self.noise_object.inverse_omegas[3:6], self.noise_object.inverse[3:6])
+            rx0_error = get_gates(self.noise_object.labels[0:3], self.noise_object.inverse_omegas[0:3], self.noise_object.inverse[0:3])
+            rx1_error = get_gates(self.noise_object.labels[3:6], self.noise_object.inverse_omegas[3:6], self.noise_object.inverse[3:6])
             for ele in cx1_error:
-                if ele != 'II':
-                    cx1_err_gate *= self.noise_object.expanded_gates[ele] * cx1_err_gate
-                    num_pauli += 1
+                if ele[0] != 'II':
+                    cx1_err_gate *= self.noise_object.expanded_gates[ele[0]] * cx1_err_gate
+                    if ele[1] > 0:
+                        num_pauli += 1
             total_gamma *= self.noise_object.gammas[2]
             for ele in cx2_error:
-                if ele != 'II':
-                    cx2_err_gate *= self.noise_object.expanded_gates[ele] * cx2_err_gate
-                    num_pauli += 1
+                if ele[0] != 'II':
+                    cx2_err_gate *= self.noise_object.expanded_gates[ele[0]] * cx2_err_gate
+                    if ele[1] > 0:
+                        num_pauli += 1
             total_gamma *= self.noise_object.gammas[2]
             for ele in rz1_error:
-                if ele != 'II':
-                    rz1_err_gate *= self.noise_object.expanded_gates[ele] * rz1_err_gate
-                    num_pauli += 1
+                if ele[0] != 'II':
+                    rz1_err_gate *= self.noise_object.expanded_gates[ele[0]] * rz1_err_gate
+                    if ele[1] > 0:
+                        num_pauli += 1
             total_gamma *= self.noise_object.gammas[1]
             for ele in rx0_error:
-                if ele != 'II':
-                    rx0_err_gate *= self.noise_object.expanded_gates[ele] * rx0_err_gate
-                    num_pauli += 1
+                if ele[0] != 'II':
+                    rx0_err_gate *= self.noise_object.expanded_gates[ele[0]] * rx0_err_gate
+                    if ele[1] > 0:
+                        num_pauli += 1
             total_gamma *= self.noise_object.gammas[0]
             for ele in rx1_error:
-                if ele != 'II':
-                    rx1_err_gate *= self.noise_object.expanded_gates[ele] * rx1_err_gate
-                    num_pauli += 1
+                if ele[0] != 'II':
+                    rx1_err_gate *= self.noise_object.expanded_gates[ele[0]] * rx1_err_gate
+                    if ele[1] > 0:
+                        num_pauli += 1
             total_gamma *= self.noise_object.gammas[1]
 
             trotter_gate = (

@@ -3,9 +3,11 @@ from mitiq import QPROGRAM
 import numpy as np
 from typing import cast, List, Optional
 import numpy.typing as npt
-from mitiq.pec.types import NoisyBasis, OperationRepresentation
+# from mitiq.pec.types import OperationRepresentation
 from mitiq.pec.representations.optimal import minimize_one_norm
 from qutip import sigmax, sigmay, sigmaz, sigmam, sigmap, qeye
+from ModifiedMitiq.NoisyOperationMod import NoisyOperation
+from ModifiedMitiq.OperationRepresentationMod import OperationRepresentation
 
 
 def _Trotter(
@@ -85,7 +87,7 @@ def _Trotter(
 def find_optimal_representation_super(
     ideal_operation: QPROGRAM,
     noisy_super_operator: npt.NDArray[np.complex64],
-    noisy_operations: List[NoisyBasis],
+    noisy_operations: List[NoisyOperation],
     tol: float = 1.0e-8,
     initial_guess: Optional[npt.NDArray[np.float64]] = None,
 ) -> OperationRepresentation:
@@ -422,3 +424,103 @@ def process_mag(
     mx_shots = list(mx_dict.values())
     return (thymes, mx_shots)
 
+def z_Trotter_2rx(
+                  rz1: OperationRepresentation,
+                  N: int, 
+                  backend,
+                  trots: int = 1,
+                  x: bool = True,
+                  xx: bool = True,
+                  pbc: bool = True,
+                  TFIM: bool = False,
+                  rx0: OperationRepresentation = None,
+                  rx1: OperationRepresentation = None,
+                 ):
+    '''
+    A Trotter function on 2 qubits. Give it the expansions for a rz gate on qb 1 and 
+    an rx gate on qb 0 and 1 and it will return a circuit of gates selected from the 
+    expansions according to the probabilities derived from the expansions. Makes trots 
+    Trotter steps (step size is determined when performing the expansion).
+    
+    INPUTS:
+    
+    rz1 :: Object that contains the expansion and coefficients of the rz operator on qb1.
+    N :: The number of qubits.
+    backend :: The backend for transpilation.
+    trots :: The number of Trotter steps to take; default is 1.
+    x :: Boolean value (True by default) that initializes the circuit in the x basis.
+    xx :: Boolean value (True by default) that measures the circuit in the x basis.
+    pbc :: Boolean, True by default, and gives the circuit periodic boundaries.
+    TFIM :: Boolean, False by default; turns on TFIM when True.
+    rx0 :: None by default; give this parameter if TFIM is desired on qb0.
+    rx1 :: None by default; give this parameter if TFIM is desired on qb1.
+    
+    RETURNS:
+    
+    The Trotter circuit in Qiskit form, the total overhead of the circuit, and the final sign
+    associated with a given sampled circuit.
+    '''
+    xyz_circuit = QuantumCircuit(N)
+    cardinality = 1
+    gamma = 1
+    if x:
+        qc_initialize = QuantumCircuit(N)
+        qc_initialize.h(range(N))
+    for _ in range(trots):
+        xyz_circuit.barrier()
+        for n in range(0, N-1, 2):
+            gamma *= rz1.norm
+            temp = rz1.sample()
+            cardinality *= temp[1]
+            xyz_circuit.cx(n, n+1)
+            xyz_circuit.append(temp[0].native_circuit, [n+1])
+            xyz_circuit.cx(n, n+1)
+        for n in range(1, N-1, 2):
+            gamma *= rz1.norm
+            temp = rz1.sample()
+            cardinality *= temp[1]
+            xyz_circuit.cx(n, n+1)
+            xyz_circuit.append(temp[0].native_circuit, [n+1])
+            xyz_circuit.cx(n, n+1)
+        if pbc:
+            gamma *= rz1.norm
+            temp = rz1.sample()
+            cardinality *= temp[1]
+            xyz_circuit.cx(0, n+1)
+            xyz_circuit.append(temp[0].native_circuit, [n+1])
+            xyz_circuit.cx(0, n+1)
+        xyz_circuit.barrier()
+        if TFIM and rx0 is not None and rx1 is not None:
+            # xyz_circuit.barrier()
+            temp1 = rx0.sample()
+            temp2 = rx1.sample()
+            gamma *= rx0.norm * rx1.norm
+            cardinality *= temp1[1] * temp2[1]
+            xyz_circuit.append(temp1[0].native_circuit, [0])
+            xyz_circuit.append(temp2[0].native_circuit, [1])
+        if TFIM and (rx0 is None or rx1 is None):
+            raise ValueError('Requires the optimal representation of both rx0 and rx1 if TFIM desired.')
+    xyz_circuit.barrier()
+    if xx:
+        qc_measure = QuantumCircuit(N)
+        qc_measure.h(range(N))
+        qc_measure.barrier()
+    
+    xyz_circuit_t = transpile(xyz_circuit, backend, optimization_level=0)
+    
+    if x and xx:
+        final_circuit = (qc_initialize.compose(
+                    xyz_circuit_t.decompose().decompose().decompose())
+                        ).compose(qc_measure)
+    if x and not xx:
+        final_circuit = (qc_initialize.compose(
+                    xyz_circuit_t.decompose().decompose().decompose())
+                        )
+    if not x and xx:
+        final_circuit = (
+                    xyz_circuit_t.decompose().decompose().decompose()
+                        ).compose(qc_measure)
+    if not x and not xx:
+        final_circuit = xyz_circuit_t.decompose().decompose().decompose()
+    
+    return (final_circuit, gamma, cardinality)
